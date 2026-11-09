@@ -194,6 +194,12 @@ public:
         on_submit = std::move(func);
     }
 
+    /// Writes that timestamp query (reset in this submission) at the end of the current
+    /// submission, once all its work is done (ListWaitTimestamps).
+    void WriteTimestampAtSubmit(VkQueryPool pool, u32 query) {
+        submit_timestamp = {pool, query};
+    }
+
     /// Send work to a separate thread.
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer, vk::CommandBuffer>
@@ -439,6 +445,7 @@ private:
 
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;
+    std::pair<VkQueryPool, u32> submit_timestamp{};
 
     State state;
     u64 recording_epoch = 0;

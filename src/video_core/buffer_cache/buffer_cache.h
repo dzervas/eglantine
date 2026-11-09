@@ -2475,6 +2475,7 @@ bool BufferCache<P>::Nx2CopyListPages(u64 tick) {
         std::ranges::sort(nx2_list_copy_requests, {}, &std::pair<BufferId, DAddr>::second);
         constexpr DAddr page_size = DAddr{1} << Tegra::Nx2WrittenPageBits;
         bool recorded = false;
+        u64 stamp{};
         for (size_t i = 0; i < nx2_list_copy_requests.size(); ++i) {
             const DAddr page = nx2_list_copy_requests[i].second;
             if (i + 1 < nx2_list_copy_requests.size() &&
@@ -2503,6 +2504,9 @@ bool BufferCache<P>::Nx2CopyListPages(u64 tick) {
                 .size = end - begin,
             };
             buffer.MarkUsage(copy.src_offset, copy.size);
+            if (!recorded) {
+                stamp = runtime.Nx2ReserveListCopyStamp(tick);
+            }
             runtime.CopyBuffer(staging.buffer, buffer, std::span{&copy, 1}, true);
             recorded = true;
             std::scoped_lock lock{nx2_list_mutex};
@@ -2514,10 +2518,14 @@ bool BufferCache<P>::Nx2CopyListPages(u64 tick) {
             entry.copy_writes = entry.writes;
             entry.copy_tick = tick;
             entry.copy_time = Nx2Profile::Enabled() ? Nx2Profile::Now() : 0;
+            entry.copy_stamp = stamp;
             entry.copy_begin = static_cast<u32>(begin - page);
             entry.copy_end = static_cast<u32>(end - page);
         }
         nx2_list_copy_requests.clear();
+        if (recorded) {
+            runtime.Nx2WriteListCopyStamp(stamp);
+        }
         std::erase_if(nx2_retired_list_copies, [this](auto& retired) {
             if (!runtime.IsFree(retired.first)) {
                 return false;
@@ -2548,6 +2556,7 @@ auto BufferCache<P>::Nx2ReadListCopy(DAddr device_addr, std::span<u8> out, bool 
         u64 tick{};
         u64 writes{};
         u64 copy_time{};
+        u64 stamp{};
         {
             std::scoped_lock lock{nx2_list_mutex};
             const auto it = nx2_list_pages.find(page);
@@ -2582,11 +2591,12 @@ auto BufferCache<P>::Nx2ReadListCopy(DAddr device_addr, std::span<u8> out, bool 
             tick = entry.copy_tick;
             writes = entry.copy_writes;
             copy_time = entry.copy_time;
+            stamp = entry.copy_stamp;
         }
         // Submitted with the work that wrote the page (Nx2CopyListPages's caller flushes).
         {
             Nx2Profile::Scope profile_scope{Nx2Profile::Zone::ListCopyWait};
-            runtime.WaitSubmittedTick(tick);
+            runtime.Nx2WaitListCopy(tick, stamp);
         }
         Nx2Profile::AddListCopyDone(copy_time);
         std::scoped_lock lock{nx2_list_mutex};

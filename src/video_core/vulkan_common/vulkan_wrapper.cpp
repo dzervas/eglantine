@@ -167,6 +167,7 @@ void Load(VkDevice device, DeviceDispatch& dld) noexcept {
     X(vkCmdSetColorBlendEnableEXT);
     X(vkCmdSetColorBlendEquationEXT);
     X(vkCmdResetQueryPool);
+    X(vkCmdWriteTimestamp);
     X(vkCmdResolveImage);
     X(vkCreateBuffer);
     X(vkCreateBufferView);
@@ -230,6 +231,7 @@ void Load(VkDevice device, DeviceDispatch& dld) noexcept {
     X(vkGetPipelineExecutablePropertiesKHR);
     X(vkGetPipelineExecutableStatisticsKHR);
     X(vkGetSemaphoreCounterValue);
+    X(vkGetCalibratedTimestampsEXT);
     X(vkMapMemory);
     X(vkQueueBindSparse);
     X(vkQueueSubmit);

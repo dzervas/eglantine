@@ -89,6 +89,7 @@ VK_DEFINE_HANDLE(VmaPool)
 // Define miscellaneous extensions which may be used by the implementation here.
 #define FOR_EACH_VK_EXTENSION(EXTENSION)                                                           \
     EXTENSION(EXT, ASTC_DECODE_MODE, astc_decode_mode)                                             \
+    EXTENSION(EXT, CALIBRATED_TIMESTAMPS, calibrated_timestamps)                                   \
     EXTENSION(EXT, CONDITIONAL_RENDERING, conditional_rendering)                                   \
     EXTENSION(EXT, CONSERVATIVE_RASTERIZATION, conservative_rasterization)                         \
     EXTENSION(EXT, DEPTH_RANGE_UNRESTRICTED, depth_range_unrestricted)                             \
@@ -1058,6 +1059,16 @@ FN_MAX_LIMIT_LIST
 
     bool CanReportMemoryUsage() const {
         return extensions.memory_budget;
+    }
+
+    /// Returns true if GPU timestamps can be put on a host clock (VK_EXT_calibrated_timestamps).
+    bool HasCalibratedTimestamps() const {
+        return extensions.calibrated_timestamps;
+    }
+
+    /// Nanoseconds per timestamp query tick.
+    float GetTimestampPeriod() const {
+        return properties.properties.limits.timestampPeriod;
     }
 
     u64 GetDeviceMemoryUsage() const;

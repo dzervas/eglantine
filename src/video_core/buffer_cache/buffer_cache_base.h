@@ -1010,6 +1010,7 @@ private:
         u64 copy_writes{}; ///< `writes` when the copy was made: the copy is current while equal
         u64 copy_tick{};   ///< GPU tick that completes the copy
         u64 copy_time{};   ///< Nx2Profile::Now when the copy was recorded (0 unless profiling)
+        u64 copy_stamp{};  ///< The copy's timestamps (Runtime::Nx2ReserveListCopyStamp)
         /// `writes` when the front last flushed the page: guest memory holds it while equal
         u64 synced_writes{~u64{0}};
         u32 copy_begin{}; ///< Bytes of the page the copy holds (a buffer can end inside it)

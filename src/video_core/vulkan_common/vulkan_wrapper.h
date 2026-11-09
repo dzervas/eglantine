@@ -246,6 +246,7 @@ struct DeviceDispatch : InstanceDispatch {
     PFN_vkCmdPushConstants vkCmdPushConstants{};
     PFN_vkCmdPushDescriptorSetWithTemplateKHR vkCmdPushDescriptorSetWithTemplateKHR{};
     PFN_vkCmdResetQueryPool vkCmdResetQueryPool{};
+    PFN_vkCmdWriteTimestamp vkCmdWriteTimestamp{};
     PFN_vkCmdResolveImage vkCmdResolveImage{};
     PFN_vkCmdSetBlendConstants vkCmdSetBlendConstants{};
     PFN_vkCmdSetCullModeEXT vkCmdSetCullModeEXT{};
@@ -348,6 +349,7 @@ struct DeviceDispatch : InstanceDispatch {
     PFN_vkGetPipelineExecutableStatisticsKHR vkGetPipelineExecutableStatisticsKHR{};
     PFN_vkGetQueryPoolResults vkGetQueryPoolResults{};
     PFN_vkGetSemaphoreCounterValue vkGetSemaphoreCounterValue{};
+    PFN_vkGetCalibratedTimestampsEXT vkGetCalibratedTimestampsEXT{};
     PFN_vkMapMemory vkMapMemory{};
     PFN_vkQueueBindSparse vkQueueBindSparse{};
     PFN_vkQueueSubmit vkQueueSubmit{};
@@ -1189,6 +1191,16 @@ public:
         return dld->vkGetQueryPoolResults(handle, query_pool, first, count, data_size, data, stride,
                                           flags);
     }
+
+    /// VK_EXT_calibrated_timestamps; VK_ERROR_EXTENSION_NOT_PRESENT when not loaded.
+    VkResult GetCalibratedTimestamps(Span<VkCalibratedTimestampInfoEXT> infos, u64* timestamps,
+                                     u64* max_deviation) const noexcept {
+        if (!dld->vkGetCalibratedTimestampsEXT) {
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+        return dld->vkGetCalibratedTimestampsEXT(handle, infos.size(), infos.data(), timestamps,
+                                                 max_deviation);
+    }
 };
 
 class PhysicalDevice {
@@ -1281,6 +1293,11 @@ public:
 
     void ResetQueryPool(VkQueryPool query_pool, u32 first, u32 count) const noexcept {
         dld->vkCmdResetQueryPool(handle, query_pool, first, count);
+    }
+
+    void WriteTimestamp(VkPipelineStageFlagBits stage, VkQueryPool query_pool,
+                        u32 query) const noexcept {
+        dld->vkCmdWriteTimestamp(handle, stage, query_pool, query);
     }
 
     void BindDescriptorSets(VkPipelineBindPoint bind_point, VkPipelineLayout layout, u32 first,

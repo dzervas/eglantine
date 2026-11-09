@@ -381,7 +381,8 @@ BufferCacheRuntime::BufferCacheRuntime(const Device& device_, MemoryAllocator& m
       staging_pool{staging_pool_}, guest_descriptor_queue{guest_descriptor_queue_},
       quad_index_pass(device, scheduler, descriptor_pool, staging_pool,
                       compute_pass_descriptor_queue),
-      multi_range_buffers(device_) {
+      multi_range_buffers(device_),
+      list_wait_timestamps{ListWaitTimestamps::Create(device_, scheduler_)} {
     const VkDriverIdKHR driver_id = device.GetDriverID();
     const bool enable_vertex_repack = VertexRepackEnabled();
     LOG_INFO(Render_Vulkan, "69-byte vertex layout repacking {} ({})",
@@ -497,6 +498,17 @@ void BufferCacheRuntime::WaitSubmittedTick(u64 tick) {
         return;
     }
     master.Wait(tick);
+}
+
+void BufferCacheRuntime::Nx2WaitListCopy(u64 tick, u64 stamp) {
+    if (stamp == ListWaitTimestamps::NoStamp) {
+        WaitSubmittedTick(tick);
+        return;
+    }
+    const bool submitted = scheduler.IsSubmitted(tick);
+    const u64 start = ListWaitTimestamps::HostNow();
+    WaitSubmittedTick(tick);
+    list_wait_timestamps->Measure(stamp, start, ListWaitTimestamps::HostNow(), submitted);
 }
 
 void BufferCacheRuntime::Finish() {

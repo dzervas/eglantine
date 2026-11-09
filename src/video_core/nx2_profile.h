@@ -242,6 +242,14 @@ enum class Counter : u32 {
     PendingWakeTimeout,
     SkippedDraws,   ///< Draws dropped because a bound native program was rejected
     PipelineMisses, ///< Graphics/compute pipeline cache misses (a new pipeline is created)
+    // EDEN_NX2_GPU_PROFILE_LIST_WAITS (Vulkan ListWaitTimestamps): each list wait split by when
+    // the GPU finished the copy and the rest of its submission, on the host clock.
+    ListWaitsSplit,        ///< List waits split into the three parts below
+    ListWaitUntilCopyNs,   ///< Wait start until the copy completed on the GPU
+    ListWaitUntilSubmitNs, ///< Then until the rest of the copy's submission completed
+    ListWaitWakeNs,        ///< Then until the waiting thread woke
+    ListWaitsUnsplit,      ///< List waits whose timestamps were not available
+    ListWaitsUnsubmitted,  ///< List waits that began before the copy's submission
     Count,
 };
 
@@ -509,6 +517,21 @@ inline void Report(const char* thread_name = "GPU thread") {
     line += fmt::format(" | draws skipped (rejected program) {:.0f}",
                         per_second(Counter::SkippedDraws));
     line += fmt::format(" | pipeline cache misses {:.0f}", per_second(Counter::PipelineMisses));
+    if (const u64 split = data.counters[static_cast<size_t>(Counter::ListWaitsSplit)]) {
+        // Zone-like entries (ms per second, waits per second) for the log's parsers.
+        const double waits = static_cast<double>(split) * 1e9 / static_cast<double>(window);
+        line += fmt::format(" | list wait until copy {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitUntilCopyNs) / 1e6, waits);
+        line += fmt::format(" | list wait until submission {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitUntilSubmitNs) / 1e6, waits);
+        line += fmt::format(" | list wait wake {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitWakeNs) / 1e6, waits);
+    }
+    if (data.counters[static_cast<size_t>(Counter::ListWaitsSplit)] != 0 ||
+        data.counters[static_cast<size_t>(Counter::ListWaitsUnsplit)] != 0) {
+        line += fmt::format(" | list waits unsplit {:.0f}, before submission {:.0f}",
+                            per_second(Counter::ListWaitsUnsplit), per_second(Counter::ListWaitsUnsubmitted));
+    }
     LOG_INFO(HW_GPU, "{} per second:{}", thread_name, line);
     std::array<u32, std::tuple_size_v<decltype(data.macros)>> order;
     std::iota(order.begin(), order.end(), 0U);

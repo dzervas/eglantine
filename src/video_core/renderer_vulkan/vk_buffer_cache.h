@@ -15,6 +15,7 @@
 #include "video_core/buffer_cache/usage_tracker.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
+#include "video_core/renderer_vulkan/vk_list_wait_timestamps.h"
 #include "video_core/renderer_vulkan/vk_multi_range_buffer.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/renderer_vulkan/vk_update_descriptor.h"
@@ -123,6 +124,21 @@ public:
 
     /// Waits for a submitted tick without flushing: safe on threads other than the GPU thread.
     void WaitSubmittedTick(u64 tick);
+
+    /// Before recording a command list page copy for tick (BufferCache::Nx2CopyListPages): its
+    /// stamp for Nx2WaitListCopy, ListWaitTimestamps::NoStamp unless list waits are profiled.
+    u64 Nx2ReserveListCopyStamp(u64 tick) {
+        return list_wait_timestamps ? list_wait_timestamps->Reserve(tick)
+                                    : ListWaitTimestamps::NoStamp;
+    }
+    /// After recording the copies of that stamp.
+    void Nx2WriteListCopyStamp(u64 stamp) {
+        if (stamp != ListWaitTimestamps::NoStamp) {
+            list_wait_timestamps->Write(stamp);
+        }
+    }
+    /// WaitSubmittedTick for a command list page copy, split by its stamp when profiled.
+    void Nx2WaitListCopy(u64 tick, u64 stamp);
 
     void Finish();
 
@@ -318,6 +334,7 @@ private:
     VkIndexType bound_index_type = VK_INDEX_TYPE_UINT32;
     u64 bound_index_epoch = 0;
     bool bound_index_valid = false;
+    std::unique_ptr<ListWaitTimestamps> list_wait_timestamps;
 };
 
 struct BufferCacheParams {

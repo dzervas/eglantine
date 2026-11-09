@@ -93,6 +93,11 @@ public:
     /// Native program key of the bound compute program, 0 when unknown, for the frame dump.
     [[nodiscard]] u64 ComputeNativeKey();
 
+    /// True when the current shaders are invalid because a native program was rejected.
+    [[nodiscard]] bool LastShadersRejected() const noexcept {
+        return last_shaders_rejected;
+    }
+
 protected:
     struct GraphicsEnvironments {
         std::array<GraphicsEnvironment, NUM_PROGRAMS> envs;
@@ -125,6 +130,10 @@ protected:
     u64 nx2_resolved_epoch{};
     u64 nx2_resolved_map{}; ///< GPU map serial they were resolved with
     std::array<std::pair<u64, u64>, NUM_PROGRAMS> nx2_code_ranges{};
+    /// The current shaders were refused because a native program was rejected. Unlike
+    /// !last_shaders_valid, it stays false for other failures such as an invalid shader GPU
+    /// address. The rasterizer counts the skipped draws from it (LastShadersRejected).
+    bool last_shaders_rejected = false;
 
 private:
     friend struct ShaderCacheTestAccess;

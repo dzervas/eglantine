@@ -64,6 +64,14 @@ enum class Zone : u32 {
     BindStorage,       ///< Of bind stage buffers: storage buffers (touch, sync, usage, bind)
     BackReplay,   ///< Split back: decoding ring entries (Execute) outside the zones it calls
     BackIdleHook, ///< Split back: the idle hook (deferred submits) outside the zones it calls
+    BindGeometry, ///< Host vertex/index/indirect buffer binds (split out of update buffers)
+    SplitCall,    ///< Split GPU thread: back thread running deferred function calls
+    UpdateVertex, ///< Buffer cache: resolving and tracking vertex buffers
+    UpdateUniform,///< Buffer cache: resolving and tracking uniform buffers
+    CacheLockWait,///< Waiting for buffer_cache and texture_cache mutexes before drawing
+    DmaFetch,     ///< DMA pusher: fetching and translating command headers from guest memory
+    DmaDispatch,  ///< DMA pusher: command stream decoding and dispatch
+    ChannelSwitch,///< Scheduler: channel binding and resuming suspended channels
     Count,
 };
 
@@ -78,6 +86,9 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "list copy wait",
     "bind uniform bank", "bind uniform stream", "bind uniform cached", "bind storage",
     "back replay", "back idle hook",
+    "bind geometry buffers",
+    "split call", "update vertex buffers", "update uniform buffers", "cache lock wait",
+    "dma fetch", "dma dispatch", "channel switch",
 };
 
 // Read once at startup: Enabled() runs several times per method write (no guard to check).
@@ -223,6 +234,8 @@ enum class Counter : u32 {
     PendingWakePush,
     PendingWakeLatch,
     PendingWakeTimeout,
+    SkippedDraws,   ///< Draws dropped because a bound native program was rejected
+    PipelineMisses, ///< Graphics/compute pipeline cache misses (a new pipeline is created)
     Count,
 };
 
@@ -487,6 +500,9 @@ inline void Report(const char* thread_name = "GPU thread") {
         drains.pop_back();
         line += " | waits for the back by site:" + drains;
     }
+    line += fmt::format(" | draws skipped (rejected program) {:.0f}",
+                        per_second(Counter::SkippedDraws));
+    line += fmt::format(" | pipeline cache misses {:.0f}", per_second(Counter::PipelineMisses));
     LOG_INFO(HW_GPU, "{} per second:{}", thread_name, line);
     std::array<u32, std::tuple_size_v<decltype(data.macros)>> order;
     std::iota(order.begin(), order.end(), 0U);

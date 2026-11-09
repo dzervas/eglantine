@@ -2059,10 +2059,14 @@ void BufferCache<P>::DoUpdateGraphicsBuffers(bool is_indexed) {
         if (is_indexed) {
             UpdateIndexBuffer();
         }
-        UpdateVertexBuffers();
+        {
+            Nx2Profile::Scope scope{Nx2Profile::Zone::UpdateVertex};
+            UpdateVertexBuffers();
+        }
         UpdateTransformFeedbackBuffers();
         for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
             if (channel_state->enabled_uniform_buffer_masks[stage] != 0) {
+                Nx2Profile::Scope scope{Nx2Profile::Zone::UpdateUniform};
                 UpdateUniformBuffers(stage);
             }
             if (channel_state->enabled_storage_buffers[stage] != 0) {

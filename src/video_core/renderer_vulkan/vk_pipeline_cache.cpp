@@ -39,6 +39,7 @@
 #include "common/env_gate.h"
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/nx2_profile.h"
 #include "video_core/memory_manager.h"
 #include "video_core/nx2_perf.h"
 #include "video_core/renderer_vulkan/fixed_pipeline_state.h"
@@ -953,6 +954,7 @@ ComputePipeline* PipelineCache::CurrentComputePipeline(u64& native_key) {
         }
     }
     if (is_new) {
+        VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::PipelineMisses, 1);
         entry = CreateComputePipeline(key, shader);
     } else if (!entry.pending && !entry.null_pointer_slots.empty() &&
                entry.rebuilds < MaxComputeRebuilds && StaleNullPointerSlot(entry)) {
@@ -1834,6 +1836,7 @@ GraphicsPipeline* PipelineCache::CurrentGraphicsPipelineSlowPath(bool is_indexed
             ReportNewPipelineKey(graphics_key);
             pipeline = CreateGraphicsPipeline();
         }
+        VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::PipelineMisses, 1);
     }
     if (!pipeline) {
         graphics_miss = "creation-failed";

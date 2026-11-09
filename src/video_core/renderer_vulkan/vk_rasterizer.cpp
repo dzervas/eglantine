@@ -870,6 +870,11 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
         return pipeline_cache.CurrentGraphicsPipeline(is_indexed);
     }()};
     if (!pipeline) {
+        // Counted here, once per dropped draw: a rejected program stays bound, so later draws
+        // reuse the failed result. DrawTexture does not go through this path.
+        if (pipeline_cache.LastShadersRejected()) {
+            Profile::Add(Profile::Counter::SkippedDraws, 1);
+        }
         report_failure("no pipeline");
         return;
     }
@@ -1027,7 +1032,11 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
         mesh_emulation_groups = groups;
         mesh_emulation_vertices_per_group = pipeline->MeshEmulationVerticesPerGroup();
     }
-    std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
+    {
+        Profile::Scope scope{Profile::Zone::CacheLockWait};
+        std::lock(buffer_cache.mutex, texture_cache.mutex);
+    }
+    std::scoped_lock lock{std::adopt_lock, buffer_cache.mutex, texture_cache.mutex};
     if (VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::MacroReadWriterSet)) {
         Nx2ProveNonWriterDraw(*pipeline);
     }

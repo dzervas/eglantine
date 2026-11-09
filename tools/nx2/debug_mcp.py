@@ -40,6 +40,21 @@ TOOLS = [
         },
     },
     {
+        "name": "frame_times",
+        "description": "Guest-present frame intervals over seconds (default 5, max 60): mean, "
+                       "fps, percentiles, VSync interval shares (refresh_hz defaults to 60), "
+                       "stutters and every interval. Reports ring overflow as truncated. "
+                       "With 'last', the newest that many presents already recorded, at once.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60, "default": 5},
+                "last": {"type": "integer", "minimum": 1, "maximum": 4095},
+                "refresh_hz": {"type": "number", "exclusiveMinimum": 0, "default": 60},
+            },
+        },
+    },
+    {
         "name": "screenshot",
         "description": "PNG of the next presented frame (16:9, default 720 lines). Fails when no "
                        "frame is presented within timeout_s (paused or loading).",
@@ -314,6 +329,8 @@ def default_timeout(name, params):
     """The emulator's own timeout_s default, so the adapter waits at least as long."""
     if name == "capture_frame":
         return 120
+    if name == "frame_times":
+        return 5 if "last" in params else math.ceil(params.get("seconds", 5)) + 1
     if name == "sample":
         return int(params.get("seconds", 10)) + 90
     if name in ("input", "input_sequence"):

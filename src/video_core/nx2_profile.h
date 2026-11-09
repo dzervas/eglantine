@@ -72,6 +72,11 @@ enum class Zone : u32 {
     DmaFetch,     ///< DMA pusher: fetching and translating command headers from guest memory
     DmaDispatch,  ///< DMA pusher: command stream decoding and dispatch
     ChannelSwitch,///< Scheduler: channel binding and resuming suspended channels
+    AcquireDrain, ///< Split GPU thread: the front waits for the back to check a semaphore acquire
+    WaitForWriters, ///< Split GPU thread: the front waits for the compute and copy work queued
+                    ///< before a command list on GPU-written pages (GpuSplit::WaitForWriters)
+    ListFlush,    ///< The front drains the back to flush GPU-written command list pages
+                  ///< (DmaPusher::FlushGpuWrittenCommands)
     Count,
 };
 
@@ -88,7 +93,8 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "back replay", "back idle hook",
     "bind geometry buffers",
     "split call", "update vertex buffers", "update uniform buffers", "cache lock wait",
-    "dma fetch", "dma dispatch", "channel switch",
+    "dma fetch", "dma dispatch", "channel switch", "acquire drain", "wait for writers",
+    "list flush",
 };
 
 // Read once at startup: Enabled() runs several times per method write (no guard to check).

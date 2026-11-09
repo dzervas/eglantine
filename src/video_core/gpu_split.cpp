@@ -52,6 +52,26 @@ void Pause() {
 
 [[maybe_unused]] std::atomic<u32> g_back_thread_id{};
 
+// The profile zone a wait for the back counts in (EDEN_NX2_GPU_PROFILE): the waits for
+// semaphore acquires, for the writers of command lists and for list flushes apart from the
+// other drains, which stay in split drain.
+Nx2Profile::Zone WaitZone(DrainSite site) {
+    switch (site) {
+    case DrainSite::Acquire:
+    case DrainSite::AcquireTrigger:
+    case DrainSite::AcquirePoll:
+    case DrainSite::SemaphoreFlush:
+    case DrainSite::FenceRelease:
+        return Nx2Profile::Zone::AcquireDrain;
+    case DrainSite::ListWriters:
+        return Nx2Profile::Zone::WaitForWriters;
+    case DrainSite::ListFlush:
+        return Nx2Profile::Zone::ListFlush;
+    default:
+        return Nx2Profile::Zone::SplitDrain;
+    }
+}
+
 } // Anonymous namespace
 
 void GpuSplit::CheckOwner(const char* where) {
@@ -248,7 +268,7 @@ void GpuSplit::Drain(DrainSite site) {
     }
     Publish();
     hook_requested.store(true, std::memory_order_release);
-    Nx2Profile::Scope scope{Nx2Profile::Zone::SplitDrain};
+    Nx2Profile::Scope scope{WaitZone(site)};
     const u64 start = Nx2Profile::Enabled() ? Nx2Profile::Now() : 0;
     // Everything consumed is not enough: the back submits deferred work (Scheduler::DeferFlush)
     // from its idle hook afterwards, and the caller may use the scheduler once this returns.
@@ -288,6 +308,7 @@ bool GpuSplit::WaitFor(u64 target, DrainSite site) {
     }
     wait_target.store(target, std::memory_order_seq_cst);
     Publish();
+    Nx2Profile::Scope scope{WaitZone(site)};
     const u64 start = Nx2Profile::Enabled() ? Nx2Profile::Now() : 0;
     for (u32 spins = 0;; ++spins) {
         consumed_cache = consumed.load(std::memory_order_acquire);

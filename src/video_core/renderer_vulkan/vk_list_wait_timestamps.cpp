@@ -54,7 +54,8 @@ ListWaitTimestamps::ListWaitTimestamps(const Device& device_, Scheduler& schedul
           .queryCount = QueryCount,
           .pipelineStatistics = 0,
       })},
-      period_ns{device.GetTimestampPeriod()} {}
+      period_ns{device.GetTimestampPeriod()},
+      submit_host_ns{std::make_unique<std::atomic<u64>[]>(2 * QueryCount)} {}
 
 u64 ListWaitTimestamps::HostNow() {
     return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -72,6 +73,9 @@ u64 ListWaitTimestamps::Reserve(u64 tick) {
     if (tick != stamped_tick) {
         stamped_tick = tick;
         end_query = NextQuery();
+        (void)NextQuery(); // The begin query
+        submit_host_ns[2 * end_query].store(0, std::memory_order_relaxed);
+        submit_host_ns[2 * end_query + 1].store(0, std::memory_order_relaxed);
         end_written = false;
     }
     return (u64{end_query} << 32) | NextQuery();
@@ -92,7 +96,13 @@ void ListWaitTimestamps::Write(u64 stamp) {
         cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_TRANSFER_BIT, pool, copy_query);
     });
     if (first_of_tick) {
-        scheduler.WriteTimestampAtSubmit(*pool, static_cast<u32>(stamp >> 32));
+        const u32 end = static_cast<u32>(stamp >> 32);
+        scheduler.WriteTimestampAtSubmit({
+            .pool = *pool,
+            .end_query = end,
+            .begin_query = (end + 1) % QueryCount,
+            .host_ns = &submit_host_ns[2 * end],
+        });
     }
 }
 
@@ -134,10 +144,14 @@ void ListWaitTimestamps::Measure(u64 stamp, u64 start_ns, u64 end_ns, bool submi
         Profile::Add(Profile::Counter::ListWaitsUnsplit, 1);
         return;
     }
+    const u32 end_query = static_cast<u32>(stamp >> 32);
+    const u64 reached = submit_host_ns[2 * end_query].load(std::memory_order_acquire);
+    const u64 locked = submit_host_ns[2 * end_query + 1].load(std::memory_order_acquire);
+    u64 begin_ns{};
     u64 copy_ns{};
     u64 submission_ns{};
-    if (!ReadQuery(static_cast<u32>(stamp), copy_ns) ||
-        !ReadQuery(static_cast<u32>(stamp >> 32), submission_ns)) {
+    if (reached == 0 || locked == 0 || !ReadQuery((end_query + 1) % QueryCount, begin_ns) ||
+        !ReadQuery(static_cast<u32>(stamp), copy_ns) || !ReadQuery(end_query, submission_ns)) {
         Profile::Add(Profile::Counter::ListWaitsUnsplit, 1);
         return;
     }
@@ -146,10 +160,16 @@ void ListWaitTimestamps::Measure(u64 stamp, u64 start_ns, u64 end_ns, bool submi
     const auto since_start = [&](u64 ns) {
         return ns <= start_ns ? u64{0} : (std::min)(ns - start_ns, total);
     };
-    const u64 until_copy = since_start(copy_ns);
+    const u64 until_worker = since_start(reached);
+    const u64 until_queued = (std::max)(since_start(locked), until_worker);
+    const u64 until_gpu_start = (std::max)(since_start(begin_ns), until_queued);
+    const u64 until_copy = (std::max)(since_start(copy_ns), until_gpu_start);
     const u64 until_submission = (std::max)(since_start(submission_ns), until_copy);
     Profile::Add(Profile::Counter::ListWaitsSplit, 1);
-    Profile::Add(Profile::Counter::ListWaitUntilCopyNs, until_copy);
+    Profile::Add(Profile::Counter::ListWaitUntilWorkerNs, until_worker);
+    Profile::Add(Profile::Counter::ListWaitSubmitLockNs, until_queued - until_worker);
+    Profile::Add(Profile::Counter::ListWaitUntilGpuStartNs, until_gpu_start - until_queued);
+    Profile::Add(Profile::Counter::ListWaitUntilCopyNs, until_copy - until_gpu_start);
     Profile::Add(Profile::Counter::ListWaitUntilSubmitNs, until_submission - until_copy);
     Profile::Add(Profile::Counter::ListWaitWakeNs, total - until_submission);
 }

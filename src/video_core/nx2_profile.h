@@ -80,6 +80,11 @@ enum class Zone : u32 {
                   ///< (DmaPusher::FlushGpuWrittenCommands)
     ListWaitForWriters, ///< WaitForWriters before reading a GPU-written list's copy
                         ///< (DmaPusher::ReadGpuWrittenCommands)
+    WorkerWait,       ///< Vulkan worker: waiting for a command chunk
+    WorkerRecord,     ///< Vulkan worker: recording a chunk's commands
+    WorkerSubmitLock, ///< Vulkan worker: taking Scheduler::submit_mutex to submit
+    WorkerSubmit,     ///< Vulkan worker: vkQueueSubmit
+    WorkerAllocate,   ///< Vulkan worker: a new command buffer after a submission
     Count,
 };
 
@@ -98,6 +103,7 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "split call", "update vertex buffers", "update uniform buffers", "cache lock wait",
     "dma fetch", "dma dispatch", "channel switch", "acquire drain", "wait for writers",
     "list flush", "list wait for writers",
+    "worker wait", "worker record", "worker submit lock", "worker submit", "worker allocate",
 };
 
 // Read once at startup: Enabled() runs several times per method write (no guard to check).
@@ -246,13 +252,18 @@ enum class Counter : u32 {
     SkippedDraws,   ///< Draws dropped because a bound native program was rejected
     PipelineMisses, ///< Graphics/compute pipeline cache misses (a new pipeline is created)
     // EDEN_NX2_GPU_PROFILE_LIST_WAITS (Vulkan ListWaitTimestamps): each list wait split by when
-    // the GPU finished the copy and the rest of its submission, on the host clock.
-    ListWaitsSplit,        ///< List waits split into the three parts below
-    ListWaitUntilCopyNs,   ///< Wait start until the copy completed on the GPU
-    ListWaitUntilSubmitNs, ///< Then until the rest of the copy's submission completed
-    ListWaitWakeNs,        ///< Then until the waiting thread woke
-    ListWaitsUnsplit,      ///< List waits whose timestamps were not available
-    ListWaitsUnsubmitted,  ///< List waits that began before the copy's submission
+    // the Vulkan worker reached the copy's submission and took the queue lock for it, the GPU
+    // finished the work queued before it, the copy and the rest of its submission, on the host
+    // clock.
+    ListWaitsSplit,           ///< List waits split into the six parts below
+    ListWaitUntilWorkerNs,    ///< Wait start until the worker reached the copy's submission
+    ListWaitSubmitLockNs,     ///< Then until it held Scheduler::submit_mutex to submit it
+    ListWaitUntilGpuStartNs,  ///< Then until the GPU finished the submissions before it
+    ListWaitUntilCopyNs,      ///< Then until the copy completed on the GPU
+    ListWaitUntilSubmitNs,    ///< Then until the rest of the copy's submission completed
+    ListWaitWakeNs,           ///< Then until the waiting thread woke
+    ListWaitsUnsplit,         ///< List waits whose timestamps were not available
+    ListWaitsUnsubmitted,     ///< List waits that began before the copy's submission
     Count,
 };
 
@@ -523,6 +534,12 @@ inline void Report(const char* thread_name = "GPU thread") {
     if (const u64 split = data.counters[static_cast<size_t>(Counter::ListWaitsSplit)]) {
         // Zone-like entries (ms per second, waits per second) for the log's parsers.
         const double waits = static_cast<double>(split) * 1e9 / static_cast<double>(window);
+        line += fmt::format(" | list wait until worker {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitUntilWorkerNs) / 1e6, waits);
+        line += fmt::format(" | list wait submit lock {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitSubmitLockNs) / 1e6, waits);
+        line += fmt::format(" | list wait until gpu start {:.1f} ms ({:.0f}/s)",
+                            per_second(Counter::ListWaitUntilGpuStartNs) / 1e6, waits);
         line += fmt::format(" | list wait until copy {:.1f} ms ({:.0f}/s)",
                             per_second(Counter::ListWaitUntilCopyNs) / 1e6, waits);
         line += fmt::format(" | list wait until submission {:.1f} ms ({:.0f}/s)",

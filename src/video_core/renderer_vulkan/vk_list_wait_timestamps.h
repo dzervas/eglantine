@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
+
 #include "common/common_types.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -13,10 +16,12 @@ class Scheduler;
 
 /// EDEN_NX2_GPU_PROFILE_LIST_WAITS=1 (with EDEN_NX2_GPU_PROFILE): splits each wait of the front
 /// for a GPU-written command list's copy (BufferCache::Nx2ReadListCopy) into the time until the
-/// copy itself completed on the GPU, until the rest of its submission completed, and until the
-/// waiting thread woke (Nx2Profile list wait counters). Timestamp queries after the copies and at
-/// the end of their submission, put on the host's CLOCK_MONOTONIC (steady_clock) with
-/// VK_EXT_calibrated_timestamps.
+/// Vulkan worker reached the copy's submission, until it took the queue lock to submit it,
+/// until the GPU finished the submissions before it,
+/// until the copy itself completed on the GPU, until the rest of its submission completed, and
+/// until the waiting thread woke (Nx2Profile list wait counters). Timestamp queries at the start
+/// of the copy's submission, after the copies and at its end, put on the host's CLOCK_MONOTONIC
+/// (steady_clock) with VK_EXT_calibrated_timestamps.
 class ListWaitTimestamps {
 public:
     static constexpr u64 NoStamp = ~u64{0};
@@ -26,7 +31,8 @@ public:
 
     explicit ListWaitTimestamps(const Device& device, Scheduler& scheduler);
 
-    /// Back thread, before the first list copy recorded for `tick`: the queries its stamp uses.
+    /// Back thread, before the first list copy recorded for `tick`: the queries its stamp uses
+    /// (the copy's, and the submission's end; its begin query is the one after the end's).
     u64 Reserve(u64 tick);
     /// Back thread, after the copies: records the copy timestamp, and the submission's.
     void Write(u64 stamp);
@@ -48,6 +54,8 @@ private:
     Scheduler& scheduler;
     vk::QueryPool pool;
     double period_ns{};
+    /// Per end query: steady_clock ns the worker reached the submission, and took the queue lock.
+    std::unique_ptr<std::atomic<u64>[]> submit_host_ns;
 
     // Back thread
     u32 next_query{};

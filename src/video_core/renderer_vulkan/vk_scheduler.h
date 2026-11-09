@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -194,10 +195,18 @@ public:
         on_submit = std::move(func);
     }
 
-    /// Writes that timestamp query (reset in this submission) at the end of the current
-    /// submission, once all its work is done (ListWaitTimestamps).
-    void WriteTimestampAtSubmit(VkQueryPool pool, u32 query) {
-        submit_timestamp = {pool, query};
+    /// ListWaitTimestamps: the current submission writes timestamp `end_query` (reset in it) once
+    /// all its work is done, resets and writes `begin_query` once the submissions before it are
+    /// done, and stores the steady_clock time (ns) the worker reached it in `host_ns[0]` and took
+    /// submit_mutex for it in `host_ns[1]`.
+    struct SubmitTimestamps {
+        VkQueryPool pool{};
+        u32 end_query{};
+        u32 begin_query{};
+        std::atomic<u64>* host_ns{};
+    };
+    void WriteTimestampAtSubmit(const SubmitTimestamps& timestamps) {
+        submit_timestamp = timestamps;
     }
 
     /// Send work to a separate thread.
@@ -445,7 +454,7 @@ private:
 
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;
-    std::pair<VkQueryPool, u32> submit_timestamp{};
+    SubmitTimestamps submit_timestamp{};
 
     State state;
     u64 recording_epoch = 0;

@@ -354,17 +354,22 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
         return true;
     }};
 
+    namespace Profile = VideoCommon::Nx2Profile;
     while (!stop_token.stop_requested()) {
+        Profile::Report("Vulkan worker");
         std::unique_ptr<CommandChunk> work;
 
         {
             std::unique_lock lk{queue_mutex};
 
             // Wait for work.
-            event_cv.wait(lk, stop_token, [&] {
-                worker_waiting = !TryPopQueue(work);
-                return !worker_waiting;
-            });
+            {
+                Profile::Scope scope{Profile::Zone::WorkerWait};
+                event_cv.wait(lk, stop_token, [&] {
+                    worker_waiting = !TryPopQueue(work);
+                    return !worker_waiting;
+                });
+            }
             worker_waiting = false;
 
             // If we've been asked to stop, we're done.
@@ -380,10 +385,14 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
             // Perform the work, tracking whether the chunk was a submission
             // before executing.
             const bool has_submit = work->HasSubmit();
-            work->ExecuteAll(current_cmdbuf, current_upload_cmdbuf);
+            {
+                Profile::Scope scope{Profile::Zone::WorkerRecord};
+                work->ExecuteAll(current_cmdbuf, current_upload_cmdbuf);
+            }
 
             // If the chunk was a submission, reallocate the command buffer.
             if (has_submit) {
+                Profile::Scope scope{Profile::Zone::WorkerAllocate};
                 AllocateWorkerCommandBuffer();
             }
         }
@@ -436,19 +445,40 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
         };
         upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+        if (timestamp.pool != VK_NULL_HANDLE) {
+            // The upload buffer runs first: done once the earlier submissions are.
+            upload_cmdbuf.ResetQueryPool(timestamp.pool, timestamp.begin_query, 1);
+            upload_cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamp.pool,
+                                         timestamp.begin_query);
+        }
         upload_cmdbuf.End();
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, READ_BARRIER);
-        if (timestamp.first != VK_NULL_HANDLE) {
-            cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamp.first,
-                                  timestamp.second);
+        if (timestamp.pool != VK_NULL_HANDLE) {
+            cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamp.pool,
+                                  timestamp.end_query);
         }
         cmdbuf.End();
 
         if (on_submit) {
             on_submit();
         }
-
-        std::scoped_lock lock{submit_mutex};
+        const auto store_host_ns = [&timestamp](size_t index) {
+            if (timestamp.host_ns != nullptr) {
+                timestamp.host_ns[index].store(
+                    static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch())
+                                         .count()),
+                    std::memory_order_release);
+            }
+        };
+        store_host_ns(0);
+        std::unique_lock lock{submit_mutex, std::defer_lock};
+        {
+            VideoCommon::Nx2Profile::Scope scope{VideoCommon::Nx2Profile::Zone::WorkerSubmitLock};
+            lock.lock();
+        }
+        store_host_ns(1);
+        VideoCommon::Nx2Profile::Scope submit_scope{VideoCommon::Nx2Profile::Zone::WorkerSubmit};
         switch (const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
         case VK_SUCCESS:

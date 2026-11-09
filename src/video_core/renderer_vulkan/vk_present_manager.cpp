@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <vector>
 
 #include "common/logging.h"
@@ -537,6 +538,18 @@ void PresentManager::DiscardFrame(Frame* frame) {
 }
 
 void PresentManager::CopyToSwapchain(Frame* frame) {
+    // Lab only (unattended benchmarks on Xvfb, dotfiles-2hg.10): EDEN_NX2_LAB_SKIP_PRESENT=1 drops
+    // each frame after its rendering instead of presenting it. NVIDIA's X11 present is a ~21 ms
+    // CPU copy that holds Scheduler::submit_mutex and stalls every submission, which a real
+    // display doesn't have. No vsync pacing; screenshots don't use the swapchain.
+    static const bool skip_present = [] {
+        const char* value = std::getenv("EDEN_NX2_LAB_SKIP_PRESENT");
+        return value != nullptr && value[0] == '1';
+    }();
+    if (skip_present) {
+        DiscardFrame(frame);
+        return;
+    }
     bool requires_recreation = false;
 
     for (u32 attempt = 0; attempt < MAX_PRESENT_ATTEMPTS; ++attempt) {

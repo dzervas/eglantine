@@ -842,7 +842,7 @@ bool DmaPusher::ReadGpuWrittenCommands(GPUVAddr address, u32 count) {
     }
     auto& split = VideoCommon::GpuSplit::Get();
     if (split.Active()) {
-        split.WaitForWriters();
+        split.WaitForWriters(VideoCommon::DrainSite::ListReadWriters);
     }
     bool past_sync = !split.Active();
     using GpuWrittenList = VideoCore::RasterizerInterface::GpuWrittenList;

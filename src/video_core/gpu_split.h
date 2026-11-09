@@ -41,6 +41,7 @@ enum class DrainSite : u32 {
     SemaphoreFlush, ///< The acquired semaphore is in the buffer cache
     FenceRelease,   ///< The puller's acquires release the pending fences
     ListWriters,    ///< GPU-written command lists: the dispatches and copies sent before them
+    ListReadWriters, ///< The same, before reading a GPU-written list's copy (ReadGpuWrittenCommands)
     ListSync,       ///< Command lists on draw-written pages: the work before the last host sync
     ListFlush,      ///< Command lists on GPU-written pages: drain and flush the pages
     MacroDmaRead,   ///< The front's macros read memory (MME DMA)
@@ -56,7 +57,7 @@ enum class DrainSite : u32 {
 inline constexpr std::array<const char*, static_cast<size_t>(DrainSite::Count)> drain_site_names{
     "other",       "fetch drain",     "acquire",    "acquire trigger", "acquire poll",
     "semaphore flush", "fence release",
-    "list writers", "list sync",      "list flush", "macro dma read",  "macro dma writes",
+    "list writers", "list read writers", "list sync",      "list flush", "macro dma read",  "macro dma writes",
     "macro dma flush",
     "gp sync fence", "map",           "front start", "front verify",
 };
@@ -235,7 +236,7 @@ public:
     }
     /// Waits until the back executed the compute and copy work sent so far (not what came after).
     /// Returns whether any of it was still queued.
-    bool WaitForWriters();
+    bool WaitForWriters(DrainSite site = DrainSite::ListWriters);
     /// A host-level wait was just sent (a syncpoint acquire, a host WFI, a GP entry with its sync
     /// bit; semaphore acquires drain): the guest's GPU work before it is complete before the
     /// commands after it are fetched.

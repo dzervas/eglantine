@@ -65,6 +65,8 @@ Nx2Profile::Zone WaitZone(DrainSite site) {
         return Nx2Profile::Zone::AcquireDrain;
     case DrainSite::ListWriters:
         return Nx2Profile::Zone::WaitForWriters;
+    case DrainSite::ListReadWriters:
+        return Nx2Profile::Zone::ListWaitForWriters;
     case DrainSite::ListFlush:
         return Nx2Profile::Zone::ListFlush;
     default:
@@ -293,8 +295,8 @@ void GpuSplit::Drain(DrainSite site) {
     }
 }
 
-bool GpuSplit::WaitForWriters() {
-    return WaitFor(std::min(last_writer_position, write_position), DrainSite::ListWriters);
+bool GpuSplit::WaitForWriters(DrainSite site) {
+    return WaitFor(std::min(last_writer_position, write_position), site);
 }
 
 bool GpuSplit::WaitForSync() {
